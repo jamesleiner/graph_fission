@@ -13,7 +13,7 @@ first=TRUE
 for(k in c(0,1)){
   for(est_var in c(TRUE,FALSE)){
     for(err in err_type_list){
-      filename = paste("results_graphfission_crossval_",k,"_",err,sep="")
+      filename = paste("results/results_graphfission_crossval_",k,"_",err,sep="")
       if(est_var){
         filename= paste(filename,"_estvar.Rdata",sep="")
       }
