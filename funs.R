@@ -453,7 +453,7 @@ run_experiment_ridge <- function(graph,edges,edge_mat, active_set,k=2,sd_level=1
     sd <- apply(cv_mse,2,sd)
     
     ind <- which(mse == min(mse))
-    ind_1se <- min(which(mse < (mse[ind] + sd[ind])))
+    ind_1se <- max(which(mse < (mse[ind] + sd[ind])))
     lambda_1se = lambda_list[ind_1se]
     lambda_min = lambda_list[ind]
     vec_1se = rep(0,length(lambda_list))
@@ -519,10 +519,10 @@ ridge_soln <-function(Y,edge_mat,k=0,lambda=1){
   n=dim(penalty)[2]
   gram = diag(n) + lambda*n*t(penalty) %*% penalty
   beta_hat = pinv(gram) %*% Y
-  df = tr(pinv(gram) )
+  df = sum(diag(pinv(gram)))
   return(list(beta = beta_hat,df=df))
 }
-run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=1,scale=10,err_type="normal",est_var=FALSE,K_list =c(2,3,4,5,6,7,8,9,10,15,20,25,30),lambda_list = c(1:100/1000,1:1000/10)){
+run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=1,scale=10,err_type="normal",est_var=FALSE,K_list =c(2,3,4,5,6,7,8,9,10,15,20,25,30),lambda_list = c(1:100/10000,2:100/1000,2:10/100)){
   if(k %*% 2 == 0){
     active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
   }
@@ -554,13 +554,13 @@ run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=
     sd <- apply(cv_mse,2,sd)
     
     ind <- which(mse == min(mse))
-    ind_1se <- min(which(mse < (mse[ind] + sd[ind])))
+    ind_1se <- max(which(mse < (mse[ind] + sd[ind])))
     lambda_1se = lambda_list[ind_1se]
     lambda_min = lambda_list[ind]
     
     a = sapply(lambda_list, function(x) ridge_soln(dat$Y,edge_mat,k=k,lambda=x))
     beta= as.matrix(data.frame(a[1,])) 
-    df = as.vector(data.frame(a[2,]))
+    df = unlist(a[2,])
     mse = colMeans((beta- as.vector(dat$Y))**2)
     err_true = colMeans((beta- as.vector(dat$mean))**2)
     sure = mse+2*df*sd_level/nrow(beta)

@@ -7,7 +7,184 @@ library(tidyr)
 library(plotly)
 library(genlasso)
 source("funs.R")
+graph = expand.grid(x=seq(0,9,1),y=seq(0,9,1))
 
+
+for(node_ind in 1:nrow(graph)){
+  print(node_ind)
+  node = graph[node_ind,]
+  
+  dist = apply(graph,1,function(x) sum(abs(x - node)))
+  adj = as.numeric(rownames(graph[dist==1,]))
+  edge_mat = matrix(data=0,nrow=length(adj),ncol=nrow(graph))
+  
+  for(i in 1:length(adj)) {
+    node_1 = min(node_ind,adj[i])
+    node_2 = max(node_ind,adj[i])
+    
+    edge_mat[i,node_1] = -1 
+    edge_mat[i,node_2] = 1
+  }
+  if(node_ind == 1){
+    edge_mat_total = edge_mat
+  }
+  else{
+    edge_mat_total = rbind(edge_mat_total,edge_mat)
+  }
+}
+
+edge_mat <- as.matrix(distinct(data.frame(edge_mat_total)))
+edges <- t(apply(edge_mat,1,function(x) which(x != 0)))
+
+
+pois_loss <- function(beta,y,edge_mat,k=0,lambda=1){
+  graph_laplacian <- t(edge_mat) %*% edge_mat
+  if(k%%2 ==0 ) {
+    penalty = edge_mat %*% matrix.power(graph_laplacian,k/2)
+  }
+  if(k%%2 == 1){
+    penalty = matrix.power(graph_laplacian,(k+1)/2)
+  }
+  loss <-mean(-beta*y + exp(beta)) + lambda*sum(abs(penalty %*% beta))
+  return(loss)
+}
+
+
+run_tf_pois <- function(y,edge_mat,k=0,lambda=1) {
+  o <- optim(y,function(x) pois_loss(x,y,edge_mat,k=k,lambda=lambda))
+  return(o)
+}
+
+
+
+generate_data_pois <- function(graph,edges,edge_mat, active_set,k=0,sd_level=1,tau=1,scale=10,K=5){
+  graph_laplacian <- t(edge_mat) %*% edge_mat
+  consider_set = unique(c(edges[,1],edges[,2]))
+  G = edges[-active_set,]
+  num=nrow(graph)
+  
+  
+  if(k%%2 ==0 ) {
+    diff = edge_mat %*% matrix.power(graph_laplacian,k/2)
+    
+    c = 1
+    while(length(consider_set) > 0 ){
+      component = connected_component(G,consider_set[1])
+      span_vec <- rep(0,nrow(graph))
+      span_vec[component] = 1
+      consider_set = setdiff(consider_set, component)
+      if(c==1){
+        basis = span_vec
+      }
+      else{
+        basis = cbind(basis,span_vec)
+      }
+      c = c + 1
+      
+    }
+    
+    if(sum(basis)==length(basis)){
+      basis = as.matrix(basis)
+    }
+    else {
+      basis = cbind(rep(1,nrow(basis)),matrix.power(pinv(graph_laplacian),k/2) %*% basis)
+    }
+    
+  } 
+  if(k%%2 ==1) {
+    diff = matrix.power(graph_laplacian,(k+1)/2)
+    basis = matrix.power(pinv(graph_laplacian),(k+1)/2)
+    basis = cbind(rep(1,nrow(basis)), basis[,active_set])
+  }
+  
+  beta <- scale*runif(ncol(basis),0,1)
+  truth = basis %*% beta
+  get_basis(truth,edge_mat,k)
+  
+  truth = exp(truth)
+  response= rpois(length(truth),truth)
+  return(list(beta=beta,basis=basis,mean=truth,Y=response))
+}
+
+
+split_poisson <- function(y,K){
+  
+  folds <-sapply(1:length(y),function(i)rmultinom(1,y[i],rep(1,K)/K))
+  return(t(folds))
+}
+
+active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
+dat<-generate_data_pois(graph,edges,edge_mat, active_set,scale=2,k=0,sd_level=1,tau=1)
+K=6
+k=0
+Y<-dat$Y
+sel_inf <- split_poisson(Y,2)
+splits<-split_poisson(Y,K)
+
+sapply(c(0.1,1,2,3), function(x) log(run_tf_pois(train,edge_mat,k=0,lambda=x)$par)/(K-1))
+
+run_tf_pois(dat$Y,edge_mat,k=0,lambda=0.001)
+
+for(fold in 1:K){
+  train <- (rowSums(splits) - splits[,fold])
+  test <- splits[,fold]
+  o = run_tf_pois(train,edge_mat,k=0,lambda=1)
+  beta = log(o$par)/(K-1)
+  
+  
+  basis = get_basis(beta,edge_mat,k=k)
+  reg_train = glm(train~0+basis,family="poisson")
+  loss = pois_loss(beta,test,k=0,edge_mat,lambda=0)/length(theta_hat)
+  df = ncol(basis)
+  if(fold ==1 ){
+    cv_loss = loss
+    cv_df = df
+  }
+  else{
+    cv_loss = rbind(cv_loss,loss)
+    cv_df = rbind(cv_df,df)
+  }
+}
+
+
+mse <- apply(cv_mse,2,mean)
+sd <- apply(cv_mse,2,sd)
+
+ind <- which(mse == min(mse))
+ind_1se <- max(which(mse < (mse[ind] + sd[ind])))
+lambda_1se = lambda_list[ind_1se]
+lambda_min = lambda_list[ind]
+
+
+
+
+run_tf_pois(dat$Y,0+edge_mat,k=0,lambda=1)
+
+
+o = run_tf_pois(train,edge_mat,k=0,lambda=1)
+beta = log(o$par)/(K-1)
+basis = get_basis(beta,edge_mat,k=k)
+reg_train = glm(train~0+basis,family="poisson")
+loss_test = pois_loss(beta,test,k=0,edge_mat,lambda=0)/length(theta_hat)
+
+
+
+pois_loss(beta,test,k=0,edge_mat,lambda=0)
+
+
+
+beta = o$par*K/(K-1)
+
+
+h = run_tf(train,edge_mat,k=k)
+res <- sapply(1:ncol(h$fit),function(x) h$fit[,x] - test)
+mse <- apply(res**2,2,mean)
+if(fold ==1 ){
+  cv_mse = mse
+}
+else{
+  cv_mse = rbind(cv_mse,mse)
+}
 
 graph = expand.grid(x=seq(0,9,1),y=seq(0,9,1))
 
@@ -40,6 +217,59 @@ edges <- t(apply(edge_mat,1,function(x) which(x != 0)))
 
 
 
+pois_loss <- function(beta,y,edge_mat,k=0,lambda=1){
+  graph_laplacian <- t(edge_mat) %*% edge_mat
+  if(k%%2 ==0 ) {
+    penalty = edge_mat %*% matrix.power(graph_laplacian,k/2)
+  }
+  if(k%%2 == 1){
+    penalty = matrix.power(graph_laplacian,(k+1)/2)
+  }
+  loss <-sum(-beta*y + exp(beta)) + lambda*sum(penalty %*% beta)
+  return(loss)
+}
+
+
+run_tf_pois <- function(y,edge_mat,k=0,lambda=1) {
+  o <- optim(y,function(x) pois_loss(x,y,edge_mat,k=k,lambda=lambda))
+  return(o)
+}
+
+
+
+truth = exp(dat$mean)
+y= rpois(length(truth),truth)
+o <- optim(y,function(x) pois_loss(x,y,edge_mat,k=2,lambda=2))
+graph_laplacian <- t(edge_mat) %*% edge_mat
+k=2
+    mat = round(matrix.power(graph_laplacian,k/2) %*% o$par,7)
+    c=1
+    for(vals in unique(mat)){
+      print(vals)
+      vec = as.numeric(mat == vals)
+      if(c==1){
+        basis = vec
+      }
+      else{
+        basis = cbind(basis,vec)
+      }
+      c= c+1
+    }
+    
+    if(sum(basis)==length(basis)){
+      print("yo")
+      basis = as.matrix(basis)
+    }
+    else {
+      basis = cbind(rep(1,nrow(basis)),matrix.power(pinv(graph_laplacian),k/2) %*% basis)
+    }
+
+get_basis(o$par,edge_mat,0)
+
+a = run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=1,tau=1,lambda_list = c(1:100/10000,2:100/1000,2:10/100))
+
+
+
 a= run_experiment3(graph,edges,edge_mat,k=1,cv=0.9,tau=1,scale=0.5,err_type="sn",est_var=TRUE,K=4,sd_list=c(1,2,3,4))
 
 sd= 2
@@ -58,7 +288,7 @@ if(k %*% 2 == 0){
 }
 K=4
 
-dat = generate_data(graph,edges,edge_mat, active_set,scale=scale,k=k,sd_level=sd,tau=tau,err_type=err_type,est_var=est_var)
+dat = generate_data(graph,edges,edge_mat, active_set,scale=0.25,k=2,sd_level=sd,tau=tau,err_type=err_type,est_var=est_var)
 sd_est = dat$sd_est
 res <- get_CI2(dat$f_Y,dat$g_Y,dat$Y,edge_mat,dat$mean,dat$sd_est,cv=cv,k=k,K=K)
 
