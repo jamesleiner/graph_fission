@@ -40,7 +40,7 @@ elastic_loss <- function(beta,y,edge_mat,k=0,lambda_1=1,lambda_2=1){
   if(k%%2 == 1){
     penalty = matrix.power(graph_laplacian,(k+1)/2)
   }
-  sum((beta - y)**2) + lambda_1 * sum(penalty%*% beta) + lambda_2 * sum((penalty%*% beta)**2 )
+  sum((beta - y)**2) + lambda_1 * sum(abs(penalty%*% beta)) + lambda_2 * sum((penalty%*% beta)**2 )
 }
 
 
