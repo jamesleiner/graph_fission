@@ -6,6 +6,45 @@ library(tidyr)
 library(plotly)
 library(genlasso)
 
+
+##########################################################################################################
+# Simple helper functions
+##########################################################################################################
+
+
+proj <- function(X,Y){
+  X %*% pinv(t(X)%*%X) %*% t(X) %*% Y
+}
+
+
+proj_matrix <- function(X){
+  X %*% pinv(t(X)%*% X ) %*% t(X)
+}
+
+
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+
+get_active <- function(graph, row,x_sep=4,y_sep=5) {
+  flag <- (graph[row[1],1] == x_sep)*(graph[row[2],1] == x_sep + 1)
+  flag2 <- (graph[row[1],2] == y_sep)*(graph[row[2],2] == y_sep + 1)
+  return(flag | flag2)
+}
+
+
+
+##########################################################################################################
+# connected_component: Takes in a graph as a list of edges and identified all connected components
+#
+# Inputs: G - Graph represented as an edge list (vector)
+#         start - Starting node for the connected component search (integer)
+#
+# Outputs: List of connected component
+############################################################################################################
+
 connected_component <- function(G, start) {
   last_component = c()
   component = start
@@ -19,6 +58,16 @@ connected_component <- function(G, start) {
   return(component)
 }
 
+##########################################################################################################
+# run_tf: Runs graph trend filtering given ege matrix and order
+#
+# Inputs: response - Response variable (numeric vector)
+#         edge_mat - Graph Laplacian matrix (matrix)
+#         k - Order of the penalty term (integer)
+#
+# Outputs: Fitted trend using genlasso
+##########################################################################################################
+
 run_tf <-function(response,edge_mat, k= 0) {
   graph_laplacian <- t(edge_mat) %*% edge_mat
   if(k%%2 ==0 ) {
@@ -31,6 +80,18 @@ run_tf <-function(response,edge_mat, k= 0) {
   return(h)
   
 }
+##########################################################################################################
+# elastic_loss: Calculates square loss with elastic net loss for fitted trend
+#
+# Inputs: beta - Fitted trend (numeric)
+#         y - Response variable (numeric)
+#         edge_mat - Graph Laplacian matrix (matrix)
+#         k - Order of the penalty term (integer)
+#         lambda_1 - L1 penalty parameter (numeric)
+#         lambda_2 - L2 penalty parameter (numeric)
+#
+# Outputs: Loss 
+##########################################################################################################
 
 elastic_loss <- function(beta,y,edge_mat,k=0,lambda_1=1,lambda_2=1){
   graph_laplacian <- t(edge_mat) %*% edge_mat
@@ -46,6 +107,15 @@ elastic_loss <- function(beta,y,edge_mat,k=0,lambda_1=1,lambda_2=1){
 
 
 
+##########################################################################################################
+# multi_split: Splits the input vector into K components using decomposition rules
+#
+# Inputs: x - Assumed Gaussian  (numeric)
+#         K - Number of splitsinteger)
+#         sd_level - Standard deviation of error term, assumed known (integer)
+#
+# Outputs: Matrix containing K vectors, one fore each split
+##########################################################################################################
 
 
 multi_split <- function(x,K,sd_level) {
@@ -56,6 +126,23 @@ multi_split <- function(x,K,sd_level) {
   return(y)
 }
 
+##########################################################################################################
+# generate_data: Generates synthetic data based on the given graph structure, edges, and parameters
+#
+# Inputs: graph - Graph structure (matrix)
+#         edges - Edge in the form of a list with (node1, node2) entries (matrix)
+#         edge_mat - Graph Laplacian matrix (matrix)
+#         active_set - Active set of edges (vector)
+#         k - Order of basis (integer)
+#         sd_level - Standard deviation level for error term (numeric)
+#         tau - SProportion of information to be generated for selection (numeric)
+#         scale - Scaling of coefficients for generated data (numeric)
+#         type - Type of distribution for generating response variable (character)
+#         err_type - Type of distribution for generating noise (either normal, skew normal, t, or Laplacian)
+#         est_var - Flag to estimate noise variance from the data (logical)
+#
+# Outputs: List containing generated data and related information
+##########################################################################################################
 
 
 generate_data <- function(graph,edges,edge_mat, active_set,k=0,sd_level=1,tau=1,scale=10,type="Gaussian",err_type="normal",est_var=FALSE){
@@ -149,12 +236,6 @@ generate_data <- function(graph,edges,edge_mat, active_set,k=0,sd_level=1,tau=1,
 
 
 
-
-getmode <- function(v) {
-  uniqv <- unique(v)
-  uniqv[which.max(tabulate(match(v, uniqv)))]
-}
-
 get_basis <- function(points,edge_mat, k,precision = 8){
   graph_laplacian <- t(edge_mat) %*% edge_mat
   if(k%%2 ==0) {
@@ -191,89 +272,6 @@ get_basis <- function(points,edge_mat, k,precision = 8){
 
 
 
-get_CI <- function(select_df,infer_df,edge_mat,true_mean,cv=0.9,k=0,sd_level=1,SURE=TRUE,K=5){
-  
-  h = run_tf(select_df,edge_mat,k=k)
-  
-  
-  resid = sapply(1:dim(h$beta)[2], function(x) h$beta[,x] - select_df)
-  mse = colMeans(resid**2)
-  sure = mse+2*h$df*sd_level/nrow(h$beta)
-  lambda_sure = h$lambda[which(sure == min(sure))]    
-  
-  
-  
-  splits <- t(sapply(select_df, function(x) multi_split(x,K,sd_level)))
-  for(fold in 1:K){
-    train <- (rowSums(splits) - splits[,fold])/(1-1/K)
-    test <- splits[,fold]*K
-    h = run_tf(train,edge_mat,k=k)
-    res <- sapply(1:ncol(h$fit),function(x) h$fit[,x] - test)
-    mse <- apply(res**2,2,mean)
-    if(fold ==1 ){
-      cv_mse = mse
-    }
-    else{
-      cv_mse = rbind(cv_mse,mse)
-    }
-  }
-  mse <- apply(cv_mse,2,mean)
-  sd <- apply(cv_mse,2,sd)
-  
-  ind <- which(mse == min(mse))
-  ind_1se <- min(which(mse < (mse[ind] + sd[ind])))
-  lambda_1se = h$lambda[ind_1se]
-  lambda_min = h$lambda[ind]
-  
-  
-  
-  
-  
-  
-  fit = coef(h,lambda=lambda_1se)$beta
-  basis <- get_basis(fit,edge_mat, k)
-  reg <- lm(infer_df~0+basis)
-  pred <- predict(reg,interval="confidence",level = cv)
-  projected_mean <- lm(true_mean~0+basis)$fitted.values
-  fit_1se = setNames(cbind(projected_mean,fit,pred),c("proj_mean","fit_1","fit_2","lwr","upr"))
-  errtrue_1se = mean((pred[,1] - true_mean)**2)
-  errproj_1se = mean((pred[,1] - projected_mean)**2)
-  length_1se = mean(fit_1se[,5] - fit_1se[,4])
-  cover_1se <- mean((fit_1se[,1] >fit_1se[,4]) & (fit_1se[,1] <fit_1se[,5]))
-  df_1se <- ncol(basis)
-  
-  fit = coef(h,lambda=lambda_min)$beta
-  basis <- get_basis(fit,edge_mat, k)
-  reg <- lm(infer_df~0+basis)
-  pred <- predict(reg,interval="confidence",level = cv)
-  projected_mean <- lm(true_mean~0+basis)$fitted.values
-  fit_min = setNames(cbind(projected_mean,fit,pred),c("proj_mean","fit_1","fit_2","lwr","upr"))
-  errtrue_min = mean((pred[,1] - true_mean)**2)
-  errproj_min = mean((pred[,1] - projected_mean)**2)
-  df_min <- ncol(basis)
-  length_min = mean(fit_min[,5] - fit_min[,4])
-  cover_min <- mean((fit_min[,1] >fit_min[,4]) & (fit_min[,1] <fit_min[,5]))
-  
-  fit = coef(h,lambda=lambda_sure)$beta
-  basis <- get_basis(fit,edge_mat, k)
-  reg <- lm(infer_df~0+basis)
-  pred <- predict(reg,interval="confidence",level = cv)
-  projected_mean <- lm(true_mean~0+basis)$fitted.values
-  fit_sure = setNames(cbind(projected_mean,fit,pred),c("proj_mean","fit_1","fit_2","lwr","upr"))
-  errtrue_sure = mean((pred[,1] - true_mean)**2)
-  errproj_sure = mean((pred[,1] - projected_mean)**2)
-  length_sure = mean(fit_sure[,5] - fit_sure[,4])
-  cover_sure <- mean((fit_sure[,1] >fit_sure[,4]) & (fit_sure[,1] <fit_sure[,5]))
-  
-  df_sure <- ncol(basis)
-  
-  return(list(fit_1se=fit_1se,fit_min=fit_min,fit_sure = fit_sure,num_components = c(df_1se,df_min,df_sure),lambda=c(lambda_1se,lambda_min,lambda_sure),
-              errproj=c(errproj_1se,errproj_min,errproj_sure),errtrue=c(errtrue_1se,errtrue_min,errtrue_sure),
-              cover=c(cover_1se,cover_min,cover_sure),length=c(length_1se,length_min,length_sure)))
-}
-
-
-
 
 CI_robust <-function(basis,comp_df,select_df,true_mean,sd_high,sd_low,sd_0,cv=0.9){
   alpha = 1- cv
@@ -291,23 +289,6 @@ CI_robust <-function(basis,comp_df,select_df,true_mean,sd_high,sd_low,sd_0,cv=0.
   CI_low = A1 + qnorm(alpha/2)*sqrt(diag(covar_high))
   CI_high = A2 - qnorm(alpha/2)*sqrt(diag(covar_high))
   return(list(pred=cbind(CI_low,CI_high),gamma_low=gamma_low,gamma_high=gamma_high))
-}
-
-
-proj <- function(X,Y){
-  X %*% pinv(t(X)%*%X) %*% t(X) %*% Y
-}
-
-
-proj_matrix <- function(X){
-  X %*% pinv(t(X)%*% X ) %*% t(X)
-}
-
-
-get_active <- function(graph, row,x_sep=4,y_sep=5) {
-  flag <- (graph[row[1],1] == x_sep)*(graph[row[2],1] == x_sep + 1)
-  flag2 <- (graph[row[1],2] == y_sep)*(graph[row[2],2] == y_sep + 1)
-  return(flag | flag2)
 }
 
 
@@ -404,17 +385,6 @@ get_CI2 <- function(select_df,infer_df,comp_df,edge_mat,true_mean,sd_0,cv=0.9,k=
 
 
 
-
-elastic_loss <- function(beta,y,edge_mat,k=0,lambda_1=1,lambda_2=1){
-  graph_laplacian <- t(edge_mat) %*% edge_mat
-  if(k%%2 ==0 ) {
-    penalty = edge_mat %*% matrix.power(graph_laplacian,k/2)
-  }
-  if(k%%2 == 1){
-    penalty = matrix.power(graph_laplacian,(k+1)/2)
-  }
-  mean((beta - y)**2) + lambda_1 * sum(penalty%*% beta) + lambda_2 * sum((penalty%*% beta)**2 )
-}
 elastic_estimates <-function(train,test,edge_mat,k=2,lambda_list = c(0.01,0.1,1,2,3,5,10,100)){
   mse_vec = c()
   for(lambda in lambda_list){
@@ -429,49 +399,6 @@ elastic_estimates <-function(train,test,edge_mat,k=2,lambda_list = c(0.01,0.1,1,
     }
   }
   return(list(pred=pred,mse=mse_vec,lambda=lambda_list)) 
-}
-
-
-run_experiment_ridge <- function(graph,edges,edge_mat, active_set,k=2,sd_level=1,scale=1,tau=1,err_type="normal",est_var=FALSE,lambda_list = c(0.01,0.1,1,2,3,5,10,100),K_list =c(2,3,4,5,6,7,8,9,10,15)){
-  dat = generate_data(graph,edges,edge_mat, active_set,k=k,sd_level=sd_level,scale=scale,tau=tau,err_type=err_type,est_var=est_var)
-  sd_level = dat$sd_est
-  
-  for(K in K_list){
-    splits <- t(sapply(dat$Y, function(x) multi_split(x,K,sd_level)))
-    for(fold in 1:K){
-      train <- (rowSums(splits) - splits[,fold])/(1-1/K)
-      test <- splits[,fold]*K
-      h = ridge_estimates(train,test,edge_mat,k=k,lambda_list=lambda_list)
-      if(fold ==1 ){
-        cv_mse = h$mse
-      }
-      else{
-        cv_mse = rbind(cv_mse,h$mse)
-      }
-    }
-    mse <- apply(cv_mse,2,mean)
-    sd <- apply(cv_mse,2,sd)
-    
-    ind <- which(mse == min(mse))
-    ind_1se <- max(which(mse < (mse[ind] + sd[ind])))
-    lambda_1se = lambda_list[ind_1se]
-    lambda_min = lambda_list[ind]
-    vec_1se = rep(0,length(lambda_list))
-    vec_min = rep(0,length(lambda_list))
-    vec_min[ind] = 1
-    vec_1se[ind_1se] = 1
-    
-    est = ridge_estimates(dat$Y,dat$Y,edge_mat,k=k,lambda_list=lambda_list)
-    err_true = sapply(1:ncol(est$pred), function(x) mean((est$pred[,x] - dat$mean)**2))
-    df = cbind(K,lambda_list,mse,sd,err_true,vec_min,vec_1se)
-    if(K==K_list[1]){
-      results = df
-    }
-    else{
-      results = rbind(results,df)
-    }
-  }
-  return(results)
 }
 
 run_experiment2 <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=1,scale=10,err_type="normal",est_var=FALSE,K_list =c(2,3,4,5,6,7,8,9,10,15,20,25,30) ){
@@ -589,6 +516,7 @@ run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=
   }
   return(results)
 }
+
 run_experiment3 <- function(graph,edges,edge_mat,k=0,cv=0.9,tau=1,scale=10,err_type="normal",est_var=FALSE,K=K,sd_list=c(0.1,0.5,1,2,3,5)){
   if(k %*% 2 == 0){
     active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)

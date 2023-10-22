@@ -8,7 +8,7 @@ library(genlasso)
 source("funs.R")
 
 
-
+################ GENERATE GRAPH AND EDGE LIST ####################################################
 graph = expand.grid(x=seq(0,9,1),y=seq(0,9,1))
 
 
@@ -38,9 +38,11 @@ for(node_ind in 1:nrow(graph)){
 edge_mat <- as.matrix(distinct(data.frame(edge_mat_total)))
 edges <- t(apply(edge_mat,1,function(x) which(x != 0)))
 
-##############NEW BATCH############################
 ntrials=100
 
+
+
+################ GENERATE SIMULATIONS FOR ASSESSING CONFIDENCE INTERVAL CONSTRUCTION####################################################
 res=mclapply(1:ntrials, function(x) run_experiment3(graph,edges,edge_mat,k=0,cv=0.9,tau=1,scale=3,err_type="normal",est_var=TRUE,K=10),mc.cores=128)
 save(res,file="results_graphfission_inf_0_normal.Rdata")
 
@@ -78,7 +80,8 @@ res=mclapply(1:ntrials, function(x) run_experiment3(graph,edges,edge_mat,k=2,cv=
 save(res,file="results_graphfission_inf_2_laplace.Rdata")
 
 
-##############INITIAL BATCH############################
+
+################ GENERATE SIMULATIONS FOR ASSESSING CROSS-VALIDATION STRENGTH####################################################
 res=mclapply(1:ntrials, function(x) run_experiment2(graph,edges,edge_mat,k=0,sd_level=1,tau=1),mc.cores=128)
 res = Reduce(function(dtf1, dtf2) rbind(dtf1, dtf2, by = "i", all.x = TRUE),res)
 save(res,file="results_graphfission_crossval_0_normal.Rdata")
@@ -188,6 +191,7 @@ save(res,file="results_graphfission_crossval_2_laplace_estvar.Rdata")
 
 
 
+################ RUN EXPERIMENTS FOR L2 PENALTIES####################################################
 for(err_type in err_type_list){
   for(sd in c(0.5,1,1.5,2,2.5,3,3.5,4,4.5)){
     for(est_var in c(TRUE,FALSE)){
@@ -200,7 +204,7 @@ for(err_type in err_type_list){
   }
 }
 
-##############INITIAL BATCH############################
+################ RUN EXPERIMENTS FOR POISSON LOSS##############################################
 ntrials = 100
 for(k in c(0,1,2)){
   for(scale in c(0.25,0.5,1,2,3)){
@@ -212,5 +216,3 @@ for(k in c(0,1,2)){
   }
 }
 
-
-run_experiment_poisson(graph,edges,edge_mat,scale=2,k=0,K=5)
