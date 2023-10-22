@@ -522,7 +522,9 @@ ridge_soln <-function(Y,edge_mat,k=0,lambda=1){
   df = sum(diag(pinv(gram)))
   return(list(beta = beta_hat,df=df))
 }
-run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=1,scale=10,err_type="normal",est_var=FALSE,K_list =c(2,3,4,5,6,7,8,9,10,15,20,25,30),lambda_list = c(1:100/10000,2:100/1000,2:10/100)){
+
+
+run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=1,scale=1,err_type="normal",est_var=FALSE,K_list =c(2,3,4,5,6,7,8,9,10,15,20,25,30),lambda_list = c(1:100/10000,2:100/1000,2:10/100)){
   if(k %*% 2 == 0){
     active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
   }
@@ -530,9 +532,9 @@ run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=
     active_set = c(5,20,37,43)
   }
   dat = generate_data(graph,edges,edge_mat, active_set,k=k,sd_level=sd_level,scale=scale,tau=tau,err_type=err_type,est_var=est_var)
-  sd_level = dat$sd_est
+  sd_est = dat$sd_est
   for(K in K_list){
-    splits <- t(sapply(dat$Y, function(x) multi_split(x,K,sd_level)))
+    splits <- t(sapply(dat$Y, function(x) multi_split(x,K,sd_est)))
     for(fold in 1:K){
       train <- (rowSums(splits) - splits[,fold])/(1-1/K)
       test <- splits[,fold]*K
@@ -563,7 +565,7 @@ run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=
     df = unlist(a[2,])
     mse = colMeans((beta- as.vector(dat$Y))**2)
     err_true = colMeans((beta- as.vector(dat$mean))**2)
-    sure = mse+2*df*sd_level/nrow(beta)
+    sure = mse+2*df*sd_est/nrow(beta)
     ind_sure = which(sure == min(sure))
     lambda_sure = lambda_list[ind_sure]    
     res = data.frame(type=c("1se","min","SURE"),
@@ -571,7 +573,13 @@ run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=
                      lambda = c(as.matrix(cbind(lambda_1se,lambda_min,lambda_sure))),
                      mse =c(as.matrix(cbind(mse[ind_1se],mse[ind],mse[ind_sure]))),
                      errtrue =c(as.matrix(cbind(err_true[ind_1se],err_true[ind],err_true[ind_sure]))))
+    res$k = k 
     res$K = K
+    res$scale = scale
+    res$sd_level = sd_level
+    res$sd_est = dat$sd_est
+    res$err_type = err_type
+    res$est_var = est_var
     if(K==K_list[1]){
       results = res
     }
@@ -581,7 +589,6 @@ run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=
   }
   return(results)
 }
-
 run_experiment3 <- function(graph,edges,edge_mat,k=0,cv=0.9,tau=1,scale=10,err_type="normal",est_var=FALSE,K=K,sd_list=c(0.1,0.5,1,2,3,5)){
   if(k %*% 2 == 0){
     active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
@@ -605,5 +612,160 @@ run_experiment3 <- function(graph,edges,edge_mat,k=0,cv=0.9,tau=1,scale=10,err_t
     colnames(results) <- c(colnames(res$metrics),"k","cv","sd","tau","scale","est_var","K")
   }
   return(results)
+}
+
+
+
+pois_loss <- function(beta,y,edge_mat,k=0,lambda=1){
+  graph_laplacian <- t(edge_mat) %*% edge_mat
+  if(k%%2 ==0 ) {
+    penalty = edge_mat %*% matrix.power(graph_laplacian,k/2)
+  }
+  if(k%%2 == 1){
+    penalty = matrix.power(graph_laplacian,(k+1)/2)
+  }
+  loss <-mean(-y*beta+exp(beta)) + lambda*sum(abs(penalty %*% beta))
+  return(loss)
+}
+
+
+run_tf_pois <- function(y,edge_mat,k=0,lambda=1) {
+  o <- optim(y,function(x) pois_loss(x,y,edge_mat,k=k,lambda=lambda))
+  return(o)
+}
+
+
+split_poisson <- function(y,K){
+  
+  folds <-sapply(1:length(y),function(i)rmultinom(1,y[i],rep(1,K)/K))
+  return(t(folds))
+}
+
+
+get_fit_pois <-function(Y,truth,basis,cv=0.9){
+  alpha = 1-cv
+  reg <- glm(Y~0+basis,family="poisson")
+  proj_trend <- glm(truth~0+basis,family="poisson")$fitted.values
+  cov_norm<-vcov(reg)
+  cov_robust<-vcovCR(reg,type='CR2',cluster=factor(1:length(Y)))
+  cov_pred_norm <- basis %*% cov_norm %*% t(basis)
+  cov_pred_robust <- basis %*% cov_robust %*% t(basis)
+  pred = exp(basis %*% reg$coefficients)
+  lwr = exp(basis%*% reg$coefficients + sqrt(diag(cov_pred_norm))*qnorm(alpha/2) )
+  upr = exp(basis%*% reg$coefficients - sqrt(diag(cov_pred_norm))*qnorm(alpha/2) )
+  lwr_robust = exp(basis%*% reg$coefficients + sqrt(diag(cov_pred_robust))*qnorm(alpha/2) )
+  upr_robust = exp(basis%*% reg$coefficients - sqrt(diag(cov_pred_robust))*qnorm(alpha/2) )
+  fit <- cbind(truth, proj_trend,pred,lwr,upr,lwr_robust,upr_robust)
+  df <- ncol(basis)
+  
+  cov_normal <- mean((fit[,4] < fit[,2]) & (fit[,2] < fit[,5]))
+  cov_robust  <- mean((fit[,6] < fit[,2]) & (fit[,2] < fit[,7]))
+  length_normal = mean(abs(fit[,5]-fit[,4]))
+  length_robust = mean(abs(fit[,7]-fit[,6]))
+  err_proj = mean(abs(proj_trend - pred))
+  err_true =  mean(abs(truth-pred))
+  metrics <- c(df,cov_normal,cov_robust,length_normal,length_robust,err_proj,err_true)
+  return(list(fit=fit,metrics=metrics))
+}
+
+
+generate_data_pois <- function(graph,edges,edge_mat, active_set,k=0,scale=10){
+  graph_laplacian <- t(edge_mat) %*% edge_mat
+  consider_set = unique(c(edges[,1],edges[,2]))
+  G = edges[-active_set,]
+  num=nrow(graph)
+  
+  
+  if(k%%2 ==0 ) {
+    diff = edge_mat %*% matrix.power(graph_laplacian,k/2)
+    
+    c = 1
+    while(length(consider_set) > 0 ){
+      component = connected_component(G,consider_set[1])
+      span_vec <- rep(0,nrow(graph))
+      span_vec[component] = 1
+      consider_set = setdiff(consider_set, component)
+      if(c==1){
+        basis = span_vec
+      }
+      else{
+        basis = cbind(basis,span_vec)
+      }
+      c = c + 1
+      
+    }
+    
+    if(sum(basis)==length(basis)){
+      basis = as.matrix(basis)
+    }
+    else {
+      basis = cbind(rep(1,nrow(basis)),matrix.power(pinv(graph_laplacian),k/2) %*% basis)
+    }
+    
+  } 
+  if(k%%2 ==1) {
+    diff = matrix.power(graph_laplacian,(k+1)/2)
+    basis = matrix.power(pinv(graph_laplacian),(k+1)/2)
+    basis = cbind(rep(1,nrow(basis)), basis[,active_set])
+  }
+  
+  beta <- scale*runif(ncol(basis),0,1)
+  truth = basis %*% beta
+  get_basis(truth,edge_mat,k)
+  
+  truth = exp(truth)
+  response= rpois(length(truth),truth)
+  return(list(beta=beta,basis=basis,mean=truth,Y=response))
+}
+
+
+
+
+run_experiment_poisson <- function(graph,edges,ege_mat,scale=1,k=0,cv=0.9,K=5,lambda_list=c(1:10/100,1:10,20,25,30)){
+  alpha = 1-cv
+  if(k %*% 2 == 0){
+    active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
+  }
+  else{
+    active_set = c(5,20,37,43)
+  }
+  dat<-generate_data_pois(graph,edges,edge_mat, active_set,scale=scale,k=k)
+  sel_inf <- split_poisson(dat$Y,2)
+  f_Y = sel_inf[,1]
+  g_Y = sel_inf[,2]
+  splits<-split_poisson(f_Y,K)
+  for(fold in 1:K){
+    train <- (rowSums(splits) - splits[,fold])
+    test <- splits[,fold]
+    o = run_tf_pois(train,edge_mat,k=0,lambda=1)
+    beta = sapply(lambda_list, function(x) run_tf_pois(train,edge_mat,k=0,lambda=x)$par/(K-1))
+    loss = apply(beta,2,function(x) pois_loss(x,test,k=0,edge_mat,lambda=0))
+    if(fold ==1 ){
+      cv_loss = loss
+    }
+    else{
+      cv_loss = rbind(cv_loss,loss)
+    }
+  }
+  
+  
+  mean <- apply(cv_loss,2,mean)
+  sd <- apply(cv_loss,2,sd)
+  
+  ind <- min(which(loss == min(loss)))
+  ind_1se <- min(which(loss< (mean[ind] + sd[ind])))
+  lambda_1se = lambda_list[ind_1se]
+  lambda_min = lambda_list[ind]
+  beta = sapply(c(lambda_1se,lambda_min), function(x) run_tf_pois(f_Y,edge_mat,k=0,lambda=x)$par)
+  
+  
+  basis_1se = get_basis(beta[,1],edge_mat,k)[,-1]
+  basis_min = get_basis(beta[,2],edge_mat,k)[,-1]
+  
+  
+  fit_1se <- get_fit_pois(g_Y,dat$mean/2,basis_1se,cv=cv)
+  fit_min <- get_fit_pois(g_Y,dat$mean/2,basis_1se,cv=cv)
+  
+  return(list(fit_1se = fit_1se$fit,fit_min = fit_min$fit,metrics=rbind(fit_1se$metrics,fit_min$metrics)))
 }
 

@@ -35,6 +35,91 @@ for(node_ind in 1:nrow(graph)){
 
 edge_mat <- as.matrix(distinct(data.frame(edge_mat_total)))
 edges <- t(apply(edge_mat,1,function(x) which(x != 0)))
+run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=3,scale=1,tau=1,K_list = c(2,3,4,5,6,10),lambda_list = c(0.00001,0.00004,0.00007,0.001,0.002,0.003,0.004,0.1,0.2,0.3,0.4))
+
+
+run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=1,scale=10,err_type="normal",est_var=FALSE,K_list =c(2,3,4,5,6,7,8,9,10,15,20,25,30),lambda_list = c(1:100/10000,2:100/1000,2:10/100)){
+  if(k %*% 2 == 0){
+    active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
+  }
+  else{
+    active_set = c(5,20,37,43)
+  }
+  dat = generate_data(graph,edges,edge_mat, active_set,k=k,sd_level=sd_level,scale=scale,tau=tau,err_type=err_type,est_var=est_var)
+  sd_est = dat$sd_est
+  for(K in K_list){
+    splits <- t(sapply(dat$Y, function(x) multi_split(x,K,sd_est)))
+    for(fold in 1:K){
+      train <- (rowSums(splits) - splits[,fold])/(1-1/K)
+      test <- splits[,fold]*K
+      a=sapply(lambda_list, function(x) ridge_soln(train,edge_mat,k=k,lambda=x))  
+      beta= as.matrix(data.frame(a[1,])) 
+      df = as.vector(data.frame(a[2,]))
+      mse = colMeans((beta- test)**2)
+      if(fold ==1 ){
+        cv_mse = mse
+        cv_df = df
+      }
+      else{
+        cv_mse = rbind(cv_mse,mse)
+        cv_df = rbind(cv_df,df)
+      }
+    }
+    
+    mse <- apply(cv_mse,2,mean)
+    sd <- apply(cv_mse,2,sd)
+    
+    ind <- which(mse == min(mse))
+    ind_1se <- max(which(mse < (mse[ind] + sd[ind])))
+    lambda_1se = lambda_list[ind_1se]
+    lambda_min = lambda_list[ind]
+    
+    a = sapply(lambda_list, function(x) ridge_soln(dat$Y,edge_mat,k=k,lambda=x))
+    beta= as.matrix(data.frame(a[1,])) 
+    df = unlist(a[2,])
+    mse = colMeans((beta- as.vector(dat$Y))**2)
+    err_true = colMeans((beta- as.vector(dat$mean))**2)
+    sure = mse+2*df*sd_est/nrow(beta)
+    ind_sure = which(sure == min(sure))
+    lambda_sure = lambda_list[ind_sure]    
+    res = data.frame(type=c("1se","min","SURE"),
+                     df=c(as.matrix(cbind(df[ind_1se],df[ind],df[ind_sure]))),
+                     lambda = c(as.matrix(cbind(lambda_1se,lambda_min,lambda_sure))),
+                     mse =c(as.matrix(cbind(mse[ind_1se],mse[ind],mse[ind_sure]))),
+                     errtrue =c(as.matrix(cbind(err_true[ind_1se],err_true[ind],err_true[ind_sure]))))
+    res$k = k 
+    res$K = K
+    res$scale = scale
+    res$sd_level = sd_level
+    res$sd_est = dat$sd_est
+    res$err_type = err_type
+    res$est_var = est_var
+    if(K==K_list[1]){
+      results = res
+    }
+    else{
+      results = rbind(results,res)
+    }
+  }
+  return(results)
+}
+
+
+active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
+run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=3,scale=1,tau=1,K_list = c(2,3,4,5,6,10),lambda_list = c(0.00001,0.00004,0.00007,0.001,0.002,0.003,0.004,0.1,0.2,0.3,0.4))
+
+
+res=mclapply(1:ntrials, function(x) run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=1,tau=1,lambda_list = c(1:100/10000,2:100/1000,2:10/100)),mc.cores=128)
+save(res,file="results_graphfission_crossval_ridge_normal.Rdata")
+
+
+
+
+
+
+
+
+
 
 
 pois_loss <- function(beta,y,edge_mat,k=0,lambda=1){

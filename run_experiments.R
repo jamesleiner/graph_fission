@@ -39,7 +39,7 @@ edge_mat <- as.matrix(distinct(data.frame(edge_mat_total)))
 edges <- t(apply(edge_mat,1,function(x) which(x != 0)))
 
 ##############NEW BATCH############################
-ntrials=500
+ntrials=100
 
 res=mclapply(1:ntrials, function(x) run_experiment3(graph,edges,edge_mat,k=0,cv=0.9,tau=1,scale=3,err_type="normal",est_var=TRUE,K=10),mc.cores=128)
 save(res,file="results_graphfission_inf_0_normal.Rdata")
@@ -131,12 +131,12 @@ res=mclapply(1:ntrials, function(x) run_experiment2(graph,edges,edge_mat,k=1,sd_
 res = Reduce(function(dtf1, dtf2) rbind(dtf1, dtf2, by = "i", all.x = TRUE),res)
 save(res,file="results_graphfission_crossval_1_sn_estvar.Rdata")
 
-res=mclapply(1:ntrials, function(x) run_experiment2(graph,edges,edge_mat,k=1,sd_level=1,tau=1,err_type="t",scale=2),mc.cores=128)
+res=mclapply(1:ntrials, function(x) run_experiment2(graph,edges,edge_mat,k=1,scale=2,sd_level=1,tau=1,err_type="t",scale=2),mc.cores=128)
 res = Reduce(function(dtf1, dtf2) rbind(dtf1, dtf2, by = "i", all.x = TRUE),res)
 save(res,file="results_graphfission_crossval_1_t.Rdata")
 
 
-res=mclapply(1:ntrials, function(x) run_experiment2(graph,edges,edge_mat,k=1,sd_level=1,tau=1,err_type="t",est_var=TRUE,scale=2),mc.cores=128)
+res=mclapply(1:ntrials, function(x) run_experiment2(graph,edges,edge_mat,k=1,scale=2,sd_level=1,tau=1,err_type="t",est_var=TRUE,scale=2),mc.cores=128)
 res = Reduce(function(dtf1, dtf2) rbind(dtf1, dtf2, by = "i", all.x = TRUE),res)
 save(res,file="results_graphfission_crossval_1_t_estvar.Rdata")
 
@@ -187,40 +187,30 @@ res = Reduce(function(dtf1, dtf2) rbind(dtf1, dtf2, by = "i", all.x = TRUE),res)
 save(res,file="results_graphfission_crossval_2_laplace_estvar.Rdata")
 
 
-active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
-res=mclapply(1:ntrials, function(x) run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=1,tau=1,lambda_list = c(1:100/10000,2:100/1000,2:10/100)),mc.cores=128)
-save(res,file="results_graphfission_crossval_ridge_normal.Rdata")
 
-active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
-res=mclapply(1:ntrials, function(x) run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=1,tau=1,est_var=TRUE,lambda_list = c(1:100/10000,2:100/1000,2:10/100)),mc.cores=128)
-save(res,file="results_graphfission_crossval_ridge_normal_estvar.Rdata")
+for(err_type in err_type_list){
+  for(sd in c(0.5,1,1.5,2,2.5,3,3.5,4,4.5)){
+    for(est_var in c(TRUE,FALSE)){
+      file = "results_graphfission_crossval_ridge"
+      file = paste(file,err_type,sd,est_var,".Rdata",sep="_")
+      print(file)
+      res=mclapply(1:ntrials, function(x) run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=sd,scale=1,tau=1,lambda_list = c(1:100/10000,2:100/1000,2:10/100),est_var=est_var,err_type=err_type),mc.cores=128)
+      save(res,file=file)
+    }
+  }
+}
 
-
-active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
-res=mclapply(1:ntrials, function(x) run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=1,tau=1,err_type="sn",lambda_list = c(1:100/10000,2:100/1000,2:10/100)),mc.cores=128)
-save(res,file="results_graphfission_crossval_ridge_sn.Rdata")
-
-
-active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
-res=mclapply(1:ntrials, function(x) run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=1,tau=1,err_type="sn",est_var=TRUE,lambda_list = c(1:100/10000,2:100/1000,2:10/100)),mc.cores=128)
-save(res,file="results_graphfission_crossval_ridge_sn_estvar.Rdata")
-
-
-active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
-res=mclapply(1:ntrials, function(x) run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=1,tau=1,err_type="t",lambda_list = c(1:100/10000,2:100/1000,2:10/100)),mc.cores=128)
-save(res,file="results_graphfission_crossval_ridge_t.Rdata")
-
-
-active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
-res=mclapply(1:ntrials, function(x) run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=1,tau=1,err_type="t",est_var=TRUE,lambda_list = c(1:100/10000,2:100/1000,2:10/100)),mc.cores=128)
-save(res,file="results_graphfission_crossval_ridge_t_estvar.Rdata")
+##############INITIAL BATCH############################
+ntrials = 100
+for(k in c(0,1,2)){
+  for(scale in c(0.25,0.5,1,2,3)){
+    file = "results/results_graphfission_poisson"
+    file = paste(file,scale,k,".Rdata",sep="_")
+    print(file)
+    res=mclapply(1:ntrials, function(x) run_experiment_poisson(graph,edges,edge_mat,scale=scale,k=k,K=5),mc.cores=128)
+    save(res,file=file)
+  }
+}
 
 
-active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
-res=mclapply(1:ntrials, function(x) run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=1,tau=1,err_type="t",lambda_list = c(1:100/10000,2:100/1000,2:10/100)),mc.cores=128)
-save(res,file="results_graphfission_crossval_ridge_laplace.Rdata")
-
-
-active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
-res=mclapply(1:ntrials, function(x) run_experiment_ridge(graph,edges,edge_mat,k=0,sd_level=1,tau=1,err_type="t",est_var=TRUE,lambda_list = c(1:100/10000,2:100/1000,2:10/100)),mc.cores=128)
-save(res,file="results_graphfission_crossval_ridge_laplace_estvar.Rdata")
+run_experiment_poisson(graph,edges,edge_mat,scale=2,k=0,K=5)

@@ -5,37 +5,196 @@ library(dplyr)
 library(tidyr)
 library(plotly)
 library(genlasso)
+source('funs.R')
+
+k=0
+
+
+graph = expand.grid(x=seq(0,9,1),y=seq(0,9,1))
+
+
+for(node_ind in 1:nrow(graph)){
+  print(node_ind)
+  node = graph[node_ind,]
+  
+  dist = apply(graph,1,function(x) sum(abs(x - node)))
+  adj = as.numeric(rownames(graph[dist==1,]))
+  edge_mat = matrix(data=0,nrow=length(adj),ncol=nrow(graph))
+  
+  for(i in 1:length(adj)) {
+    node_1 = min(node_ind,adj[i])
+    node_2 = max(node_ind,adj[i])
+    
+    edge_mat[i,node_1] = -1 
+    edge_mat[i,node_2] = 1
+  }
+  if(node_ind == 1){
+    edge_mat_total = edge_mat
+  }
+  else{
+    edge_mat_total = rbind(edge_mat_total,edge_mat)
+  }
+}
+
+edge_mat <- as.matrix(distinct(data.frame(edge_mat_total)))
+edges <- t(apply(edge_mat,1,function(x) which(x != 0)))
+
+k=0
+tau=1
+active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
+#active_set = c(5,20,37,43)
+
+dat = generate_data(graph,edges,edge_mat, active_set,scale=10,k=k,sd_level=1,tau=tau,err_type="normal",est_var=FALSE)
+res <- get_CI2(dat$f_Y,dat$g_Y,dat$Y,edge_mat,dat$mean,dat$sd_est,cv=0.9,k=k,K=5)
+#CI_old <- get_CI(dat$f_Y,dat$g_Y,edge_mat,dat$mean,k=2,sd_level=dat$sd_est,K=5,cv=0.9)
+
+
+df <- cbind(graph,res$fit_1se[,"proj_mean"]) 
+colnames(df) <- c("x","y","truth")
+df <- df%>% pivot_wider(names_from =x, values_from = truth)
+df2 <- cbind(graph,dat$Y) 
+colnames(df2) <- c("x","y","z")
+df3 <- cbind(graph,res$fit_1se[,"lwr"])
+colnames(df3) <- c("x","y","z")
+df3  <- df3 %>% pivot_wider(names_from =x, values_from = z)
+df4 <- cbind(graph,res$fit_1se[,"upr"])
+colnames(df4) <- c("x","y","z")
+df4  <- df4 %>% pivot_wider(names_from =x, values_from = z)
+
+plot_ly(showscale=FALSE,showlegend=TRUE) %>%  
+  add_trace(data = df2, x = ~x, y = ~y, z = ~z, name="Datapoint", mode = "markers", type = "scatter3d", marker = list(size = 5, color = "black", symbol = 104)) %>% 
+  add_surface(z=as.matrix(df)[,-1],opacity=1,name="Trend", colorscale = list(c(0, 1), c("blue", "blue")))%>% 
+  add_surface(z=as.matrix(df3)[,-1],opacity=0.2,name = "Lower CI", colorscale = list(c(0, 1), c("red", "red")))%>% 
+  add_surface(z=as.matrix(df4)[,-1],opacity=0.2,name = "Upper CI",colorscale = list(c(0, 1), c("red", "red"))) 
+
+
+df <- cbind(graph,res$fit_1se[,"proj_mean"]) 
+colnames(df) <- c("x","y","truth")
+df <- df%>% pivot_wider(names_from =x, values_from = truth)
+df2 <- cbind(graph,dat$Y) 
+colnames(df2) <- c("x","y","z")
+df3 <- cbind(graph,res$fit_1se[,"lwr_rob"])
+colnames(df3) <- c("x","y","z")
+df3  <- df3 %>% pivot_wider(names_from =x, values_from = z)
+df4 <- cbind(graph,res$fit_1se[,"upr_rob"])
+colnames(df4) <- c("x","y","z")
+df4 <- df4 %>% pivot_wider(names_from =x, values_from = z)
+
+plot_ly(showscale=FALSE,showlegend=TRUE) %>%  
+  add_trace(data = df2, x = ~x, y = ~y, z = ~z, name="Datapoint", mode = "markers", type = "scatter3d", marker = list(size = 5, color = "black", symbol = 104)) %>% 
+  add_surface(z=as.matrix(df)[,-1],opacity=1,name="Upper CI", colorscale = list(c(0, 1), c("blue", "blue")))%>% 
+  add_surface(z=as.matrix(df3)[,-1],opacity=0.2,name = "Lower CI", colorscale = list(c(0, 1), c("blue", "blue")))%>% 
+  add_surface(z=as.matrix(df4)[,-1],opacity=0.2,name = "Upper CI",colorscale = list(c(0, 1), c("blue", "blue")))
+
+
+
+##########################POISSON GRAPH############################################################
+scale_list = c(0.25,0.5,1,2,3)
+k_list = c(0,1,2)
+first=TRUE
+
+for(k in k_list) {
+  for(scale in scale_list){
+    file = "results/results_graphfission_poisson"
+    file = paste(file,scale,k,".Rdata",sep="_")
+    print(file)
+    if(file.exists(file)){
+      load(file)
+      for(i in 1:length(res)){
+        if(is.list(res[[i]])){
+          temp = data.frame(res[[i]]$metrics)
+          temp$k = k
+          temp$scale = scale
+          if(first==TRUE){
+            results = temp
+            first=FALSE
+          }
+            else{
+              results = rbind(results,temp)
+              }
+          }
+        }
+      }
+  }
+}
+
+
+colnames(results) <- c('df','cv','cv','length','length_r','err_true','err_proj','k','scale')
+length = aggregate(results$length ~results$scale + results$k , FUN = mean)
+results = results[!is.infinite(rowSums(results)),]
+cv = aggregate(results$cv ~results$scale + results$k , FUN = mean)
+
+
+
+colnames(cv) <- c('scale','k','cv')
+colnames(length) <- c('scale','k','length')
+plt1 <- cv%>%
+  ggplot( aes(x=scale, y=cv,color=as.factor(k),linetype=as.factor(k))) +
+  geom_line(aes(color=as.factor(k),linetype=as.factor(k)), linewidth = 1) +
+  geom_point(aes(color = as.factor(k),shape=as.factor(k)), size = 4) +
+  theme(legend.title = element_blank(),
+        panel.background = element_rect(fill = "white", colour = "black"),
+        panel.grid.major = element_line(colour = "grey", linetype = "dotted"),
+        panel.grid.minor = element_line(colour = "grey"),
+        text = element_text(size = 25),
+        legend.position = "none", legend.text = element_text(size = 15),legend.key.size = unit(2, 'cm'),legend.key = element_rect(fill = "white")) +
+  xlab("Scale") +
+  geom_hline(yintercept=0.8, linetype="dashed",color = "black", size=1.5) + 
+  ylab("Coverage")
+
+ggsave(paste("figures/poisson_cv.pdf",sep=""),plt1)
+
+
+plt2 <- length%>%
+  ggplot( aes(x=scale, y=length,color=as.factor(k),linetype=as.factor(k))) +
+  geom_line(aes(color=as.factor(k),linetype=as.factor(k)), linewidth = 1) +
+  geom_point(aes(color = as.factor(k),shape=as.factor(k)), size = 4) +
+  theme(legend.title = element_blank(),
+        panel.background = element_rect(fill = "white", colour = "black"),
+        panel.grid.major = element_line(colour = "grey", linetype = "dotted"),
+        panel.grid.minor = element_line(colour = "grey"),
+        text = element_text(size = 25),
+        legend.position = "none", legend.text = element_text(size = 15),legend.key.size = unit(2, 'cm'),legend.key = element_rect(fill = "white")) +
+  xlab("Scale") +
+  ylab("CI Length") 
+
+ggsave(paste("figures/poisson_length.pdf",sep=""),plt2)
 
 
 ##########################RIDGE CV GRAPHS############################################################
 err_type_list = c("normal","t","sn","laplace")
+sd_list = c(0.5,1,1.5,2.5,3.5,4.5)
 first=TRUE
-for(est_var in c(TRUE,FALSE)){
-  for(err in err_type_list){
-    if(est_var==TRUE){
-      filename = paste("results_graphfission_crossval_ridge","_",err,"_estvar.Rdata",sep="")
-    }else{
-      filename = paste("results_graphfission_crossval_ridge","_",err,".Rdata",sep="")
-    }
-    load(filename)
-    for(i in 1:length(res)){
-      if(is.data.frame(res[[i]])){
-        rownames(res[[i]]) <- 1:nrow(res[[i]])
-        temp <- data.frame(res[[i]])
-        temp$method = temp$type
-        temp$errtype =err
-        temp$estvar = est_var
-        if(first==TRUE){
-          results = temp
-          first=FALSE
+
+for(sd in sd_list){
+  for(est_var in c(TRUE,FALSE)){
+    for(err in err_type_list){
+      file = "results_graphfission_crossval_ridge"
+      file = paste(file,err,sd,est_var,".Rdata",sep="_")
+      if(file.exists(file)){
+        load(file)
+        for(i in 1:length(res)){
+          if(is.data.frame(res[[i]])){
+            rownames(res[[i]]) <- 1:nrow(res[[i]])
+            temp <- data.frame(res[[i]])
+            temp$method = temp$type
+            temp$errtype =err
+            temp$estvar = est_var
+            if(first==TRUE){
+              results = temp
+              first=FALSE
+            }
+            else{
+              results = rbind(results,temp)
+            } 
+          }
         }
-        else{
-          results = rbind(results,temp)
-        } 
       }
+    
     }
   }
 }
+
 results[results$method == "1se","method"] = "1 SE rule"
 results[results$method == "min","method"] = "Min CV error"
 results[results$errtype== "normal","errtype"] = "Normal"
@@ -43,13 +202,13 @@ results[results$errtype== "sn","errtype"] = "Skew-Normal"
 results[results$errtype== "laplace","errtype"] = "Laplace"
 results[results$errtype== "t","errtype"] = "t"
 
-df = aggregate(results$df ~results$K + results$method +results$errtype+results$estvar , FUN = mean)
-err = aggregate(results$errtrue ~ results$K +results$method + results$errtype+results$estvar , FUN = mean)
+df = aggregate(results$df ~results$K + results$sd_level +results$method +results$errtype+results$estvar , FUN = mean)
+err = aggregate(results$errtrue ~ results$K + results$sd_level+results$method + results$errtype+results$estvar , FUN = mean)
 
-colnames(df) <- c('K',"method","errtype","estvar",'df')
-colnames(err) <- c('K',"method","errtype","estvar",'err')
+colnames(df) <- c('K',"sd","method","errtype","estvar",'df')
+colnames(err) <- c('K',"sd","method","errtype","estvar",'err')
 
-plt1<- subset(err,(errtype=="Normal"&estvar==TRUE))%>%
+plt1<- subset(err,(errtype=="Normal"&sd==2.5&estvar==FALSE))%>%
   ggplot( aes(x=K, y=err,color=as.factor(method),linetype=as.factor(method))) +
   geom_line(aes(color=as.factor(method),linetype=as.factor(method)), linewidth = 1) +
   geom_point(aes(color = as.factor(method),shape=as.factor(method)), size = 4) +
@@ -58,30 +217,30 @@ plt1<- subset(err,(errtype=="Normal"&estvar==TRUE))%>%
         panel.grid.major = element_line(colour = "grey", linetype = "dotted"),
         panel.grid.minor = element_line(colour = "grey"),
         text = element_text(size = 25),
-        legend.position = "bottom", legend.text = element_text(size = 15),legend.key.size = unit(2, 'cm'),legend.key = element_rect(fill = "white")) +
-  xlab("Error SD") +
-  ylab("CI Length")
+        legend.position = "none", legend.text = element_text(size = 15),legend.key.size = unit(2, 'cm'),legend.key = element_rect(fill = "white")) +
+  xlab("K") +
+  ylab("Error")
 
-ggsave(paste("figures/CI_inf.pdf",sep=""),plt1)
-
-
+ggsave(paste("figures/error_ridge_cv.pdf",sep=""),plt1)
 
 
-plt2<-subset(rbind(summary3,summary4),(method=="1 SE Rule"&k==0))%>%
-  ggplot( aes(x=sd, y=cover,color=as.factor(err),linetype=as.factor(CI_type))) +
-  geom_line(aes(linetype=as.factor(CI_type),color=as.factor(err)), linewidth = 1) +
-  geom_point(aes(color = as.factor(err),shape=as.factor(err)), size = 4) +
+plt2<- subset(df,(errtype=="Normal"&sd==2.5&estvar==FALSE))%>%
+  ggplot( aes(x=K, y=df,color=as.factor(method),linetype=as.factor(method))) +
+  geom_line(aes(color=as.factor(method),linetype=as.factor(method)), linewidth = 1) +
+  geom_point(aes(color = as.factor(method),shape=as.factor(method)), size = 4) +
   theme(legend.title = element_blank(),
         panel.background = element_rect(fill = "white", colour = "black"),
         panel.grid.major = element_line(colour = "grey", linetype = "dotted"),
         panel.grid.minor = element_line(colour = "grey"),
         text = element_text(size = 25),
         legend.position = "none", legend.text = element_text(size = 15),legend.key.size = unit(2, 'cm'),legend.key = element_rect(fill = "white")) +
-  xlab("Error SD") +
-  ylab("Coverage") + 
-  geom_hline(yintercept=0.9, linetype="dashed",color = "black", size=1.5)
+  xlab("K") +
+  ylab("Degrees of freedom")
 
-ggsave(paste("figures/cov_inf.pdf",sep=""),plt2)
+ggsave(paste("figures/df_ridge_cv.pdf",sep=""),plt2)
+
+
+
 
 
 filename = paste("results_graphfission_crossval_ridge","_",err,".Rdata",sep="")
@@ -92,7 +251,8 @@ err_type_list = c("normal","t","sn","laplace")
 first=TRUE
 for(k in c(0,1)){
     for(err in err_type_list){
-      filename = paste("results_graphfission_inf_",k,"_",err,".Rdata",sep="")
+      print(filename)
+      filename = paste("results/results_graphfission_inf_",k,"_",err,".Rdata",sep="")
       load(filename)
       for(i in 1:length(res)){
         if(is.matrix(res[[i]])){
@@ -124,9 +284,9 @@ summary2 = aggregate(results$length_robust ~ results$sd + results$K + results$me
 summary3 = aggregate(results$coverage ~ results$sd +  results$K + results$method + results$k +results$errtype , FUN = mean)
 summary4 = aggregate(results$coverage_robust ~ results$sd + results$K + results$method + results$k +results$errtype , FUN = mean)
 summary1$CI_type = "Naive"
-summary2$CI_type = "Robust"
+summary2$CI_type = "Theorem 1"
 summary3$CI_type = "Naive"
-summary4$CI_type = "Robust"
+summary4$CI_type = "Theorem 1"
 
 
 
@@ -165,7 +325,7 @@ plt2<-subset(rbind(summary3,summary4),(method=="1 SE Rule"&k==1))%>%
         legend.position = "none", legend.text = element_text(size = 15),legend.key.size = unit(2, 'cm'),legend.key = element_rect(fill = "white")) +
   xlab("Error SD") +
   ylab("Coverage") + 
-  geom_hline(yintercept=0.9, linetype="dashed",color = "black", size=1.5)
+  geom_hline(yintercept=0.9,color = "GRAY", size=1.5)
 
 ggsave(paste("figures/cov_inf.pdf",sep=""),plt2)
 
@@ -179,15 +339,16 @@ colnames(summary2) <- c('sd','K',"method","k","err","sd_est","type")
 
 
 plt3<- subset(rbind(summary1,summary2),(method=="1 SE Rule"&k==1))%>%
-  ggplot( aes(x=sd, y=sd_est,color=as.factor(err),linetype=as.factor(type))) +
-  geom_line(aes(linetype=as.factor(type),color=as.factor(err)), linewidth = 1) +
-  geom_point(aes(color = as.factor(err),shape=as.factor(err)), size = 4) +
+  ggplot( aes(x=sd, y=sd_est,color=as.factor(err),shape=as.factor(type))) +
+  geom_line(aes(color=as.factor(err)), linewidth = 1) +
+  geom_point(aes(color = as.factor(err),shape=as.factor(type)), size = 20) +
   theme(legend.title = element_blank(),
         panel.background = element_rect(fill = "white", colour = "black"),
         panel.grid.major = element_line(colour = "grey", linetype = "dotted"),
         panel.grid.minor = element_line(colour = "grey"),
         text = element_text(size = 25),
-        legend.position = "bottom", legend.text = element_text(size = 6),legend.key.size = unit(1, 'cm'),legend.key = element_rect(fill = "white")) +
+        legend.position = "none", legend.text = element_text(size = 25),legend.key.size = unit(1, 'cm'),legend.key = element_rect(fill = "white")) +
+  scale_shape_manual(values = c("+", "-")) + 
   xlab("Acutal SD") +
   ylab("Estimated SD")+
   geom_abline(intercept = 0, slope = 1, size = 0.5,linetype="dashed")
