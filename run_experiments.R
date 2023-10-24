@@ -1,3 +1,10 @@
+##########################################################################################################
+#
+# Run experiments to verify efficacy of cross-validation and confidence interval construction procedures
+#
+##########################################################################################################
+
+
 library(MASS)
 library(matrixcalc)
 library(pracma)

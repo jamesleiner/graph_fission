@@ -235,7 +235,16 @@ generate_data <- function(graph,edges,edge_mat, active_set,k=0,sd_level=1,tau=1,
 
 
 
-
+##########################################################################################################
+# get_basis: Generates the basis matrix given a solution fitted with L_1 penalties
+#
+# Inputs: points - Beta-hat trend filtered solution (vector)
+#         edge_mat - Graph difference matrix (matrix)
+#         k - Order of trend filtered penalty matrix (integer)
+#         precision - Precision for deciding whether an entry is equal to 0 (numeric)
+#
+# Outputs: Basis matrix generated from the points, edge matrix, and order k
+##########################################################################################################
 get_basis <- function(points,edge_mat, k,precision = 8){
   graph_laplacian <- t(edge_mat) %*% edge_mat
   if(k%%2 ==0) {
@@ -254,7 +263,6 @@ get_basis <- function(points,edge_mat, k,precision = 8){
     }
     
     if(sum(basis)==length(basis)){
-      print("yo")
       basis = as.matrix(basis)
     }
     else {
@@ -270,6 +278,21 @@ get_basis <- function(points,edge_mat, k,precision = 8){
   return(basis)
 }
 
+
+##########################################################################################################
+# CI_robust: Computes confidence intervals using Theorem 1
+#
+# Inputs: basis - Basis matrix for regression (matrix)
+#         comp_df - Response variable Y with no added noise (numeric)
+#         select_df - Selection data Y_sel, formed with added noise (numeric)
+#         true_mean - True mean vector mu (E[Y]) (numeric)
+#         sd_high - Overestimate of sd (numeric)
+#         sd_low - Underestimate of sd (numeric)
+#         sd_0 - Standard deviation of user-generated noise vector (numeric)
+#         cv - Confidence level (numeric)
+#
+# Outputs: List containing confidence intervals, and estimates of gamma_low and gamma_high. 
+##########################################################################################################
 
 
 
@@ -292,6 +315,21 @@ CI_robust <-function(basis,comp_df,select_df,true_mean,sd_high,sd_low,sd_0,cv=0.
 }
 
 
+##########################################################################################################
+# get_fit: Computes confidence intervals using naive approach and using Theorem 1, along with evaluation metrics
+#
+# Inputs: basis - Basis matrix for regression (matrix)
+#         comp_df - Response variable Y with no added noise (numeric)
+#         select_df - Selection data Y_sel, formed with added noise (numeric)
+#         infer_df - Inference data Y_inf, formed with added noise (numeric)
+#         true_mean - True mean vector mu (E[Y]) (numeric)
+#         sd_low - Underestimate of sd (numeric)
+#         sd_high - Overestimate of sd (numeric) 
+#         sd_0 - Standard deviation of user-generated noise vector (numeric)
+#         cv - Confidence level (numeric)
+#
+# Outputs: List containing fitting results, evaluation metrics, and related information
+##########################################################################################################
 
 
 get_fit <-function(basis,comp_df,select_df,infer_df,true_mean,sd_low,sd_high,sd_0,cv=0.9) {
@@ -314,6 +352,22 @@ get_fit <-function(basis,comp_df,select_df,infer_df,true_mean,sd_low,sd_high,sd_
   
   return(list(fit=fit,metrics=metrics))
 }
+
+##########################################################################################################
+# get_CI2: Uses selection graph to tune lambda via graph cross validation, and then constructs CIs using inference graph.
+#
+# Inputs: select_df - Selection data Y_sel, formed with added noise (numeric)
+#         infer_df - Inference data Y_inf, formed with added noise (numeric)
+#         comp_df - Response variable Y with no added noise (numeric)
+#         edge_mat - Graph difference matrix (matrix)
+#         true_mean - True mean vector mu (E[Y]) (numeric)
+#         sd_0 - Standard deviation of user-generated noise vector (numeric)
+#         cv - Confidence level (numeric)
+#         k - Order of basis (integer)
+#         K - Number of folds for cross-validation (integer)
+#
+# Outputs: List containing fitted trends using 1se rule, min CV rule, and SURE to select basis, along with evaluation
+##########################################################################################################
 
 get_CI2 <- function(select_df,infer_df,comp_df,edge_mat,true_mean,sd_0,cv=0.9,k=0,K=5){
   alpha = 1-cv
@@ -383,23 +437,25 @@ get_CI2 <- function(select_df,infer_df,comp_df,edge_mat,true_mean,sd_0,cv=0.9,k=
 }
 
 
-
-
-elastic_estimates <-function(train,test,edge_mat,k=2,lambda_list = c(0.01,0.1,1,2,3,5,10,100)){
-  mse_vec = c()
-  for(lambda in lambda_list){
-    o <- optim(rep(0,100),function(x) elastic_loss(x,train,edge_mat,k=k,lambda_1=0,lambda_2 =lambda),method="L-BFGS")
-    mse = mean((o$par - test)**2)
-    mse_vec = c(mse,mse_vec)
-    if(lambda == lambda_list[1]){
-      pred = o$par
-    }
-    else{
-      pred =cbind(pred,o$par)
-    }
-  }
-  return(list(pred=pred,mse=mse_vec,lambda=lambda_list)) 
-}
+##########################################################################################################
+# run_experiment2: Runs experiment over different values of K to see the effect of graph cross-validation for 
+# SURE, 1se rule, and min CV error approaches
+#
+# Inputs: graph - Graph structure (matrix)
+#         edges - Edge in the form of a list with (node1, node2) entries (matrix)
+#         edge_mat - Graph difference matrix (matrix)
+#         k - Order of basis (integer)
+#         cv - Confidence level (numeric)
+#         sd_level - Standard deviation level for error term (numeric)
+#         tau - Proportion of information to be generated for selection (numeric)
+#         scale - Scaling of coefficients for generated data (numeric)
+#         err_type - Type of distribution for generating noise (character)
+#         est_var - Flag to estimate noise variance from the data (logical)
+#         K_list - List of K values for experiment (numeric vector)
+#
+# Outputs: Data frame containing experiment results including number of components, lambda values,
+#          error, confidence interval length, and coverage probability of confidence intervals
+##########################################################################################################
 
 run_experiment2 <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=1,scale=10,err_type="normal",est_var=FALSE,K_list =c(2,3,4,5,6,7,8,9,10,15,20,25,30) ){
   if(k %*% 2 == 0){
@@ -435,6 +491,63 @@ run_experiment2 <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=1,sca
   return(results)
 }
 
+
+##########################################################################################################
+# run_experiment2: Runs experiment over different values of K to see the effect of graph cross-validation for 
+# SURE, 1se rule, and min CV error approaches as well as CI coverage
+#
+# Inputs: graph - Graph structure (matrix)
+#         edges - Edge in the form of a list with (node1, node2) entries (matrix)
+#         edge_mat - Graph Laplacian matrix (matrix)
+#         k - Order of basis (integer)
+#         cv - Confidence level (numeric)
+#         tau - Proportion of information to be generated for selection (numeric)
+#         scale - Scaling of coefficients for generated data (numeric)
+#         err_type - Type of distribution for generating noise (character)
+#         est_var - Flag to estimate noise variance from the data (logical)
+#         K - Number of data splits (integer)
+#         sd_list - List of standard deviation levels for experiment (numeric vector)
+#
+# Outputs: Data frame containing experiment results including error of fitted solution, CI length, and CI coverage probability
+##########################################################################################################
+
+run_experiment3 <- function(graph,edges,edge_mat,k=0,cv=0.9,tau=1,scale=10,err_type="normal",est_var=FALSE,K=K,sd_list=c(0.1,0.5,1,2,3,5)){
+  if(k %*% 2 == 0){
+    active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
+  }
+  else{
+    active_set = c(5,20,37,43)
+  }
+  for(sd in sd_list){
+    print(sd)
+    dat = generate_data(graph,edges,edge_mat, active_set,scale=scale,k=k,sd_level=sd,tau=tau,err_type=err_type,est_var=est_var)
+    sd_est = dat$sd_est
+    res <- get_CI2(dat$f_Y,dat$g_Y,dat$Y,edge_mat,dat$mean,dat$sd_est,cv=cv,k=k,K=K)
+    comp <- cbind(res$metrics,k,cv,sd,tau,scale,est_var,K)
+    if(sd==sd_list[1]){
+      results = comp
+    }
+    else{
+      results = rbind(results,comp)
+    }
+    method <- rownames(results)
+    colnames(results) <- c(colnames(res$metrics),"k","cv","sd","tau","scale","est_var","K")
+  }
+  return(results)
+}
+
+##########################################################################################################
+# ridge_soln: Computes ridge regression solution for fitted trends with L_2 penalties
+#
+# Inputs: Y - Response variable (numeric)
+#         edge_mat - Graph difference matrix (matrix)
+#         k - Order of basis (integer)
+#         lambda - Regularization parameter for ridge regression (numeric)
+#
+# Outputs: List containing ridge regression coefficients and degrees of freedom
+##########################################################################################################
+
+
 ridge_soln <-function(Y,edge_mat,k=0,lambda=1){
   graph_laplacian <- t(edge_mat) %*% edge_mat
   if(k%%2 ==0 ) {
@@ -450,6 +563,26 @@ ridge_soln <-function(Y,edge_mat,k=0,lambda=1){
   return(list(beta = beta_hat,df=df))
 }
 
+##########################################################################################################
+# run_experiment_ridge: Runs ridge regression experiment with different values of K, lambda, and computes metrics
+#                       including mean squared error, error, interval length, and coverage. Uses all three methods for
+#                       selecting lambda. 
+#
+# Inputs: graph - Graph structure (matrix)
+#         edges - Edge in the form of a list with (node1, node2) entries (matrix)
+#         edge_mat - Graph difference matrix (matrix)
+#         k - Order of basis (integer)
+#         cv - Confidence level (numeric)
+#         sd_level - Standard deviation level for error term (numeric)
+#         tau - Proportion of information to be generated for selection (numeric)
+#         scale - Scaling of coefficients for generated data (numeric)
+#         err_type - Type of distribution for generating noise (either normal, skew-normal, t, or Laplace)
+#         est_var - Flag to estimate noise variance from the data or have it be known (logical)
+#         K_list - List of K values for experiment (numeric vector)
+#         lambda_list - List of lambda values for ridge regression (numeric vector)
+#
+# Outputs: Data frame containing experiment results including degrees of freedom, amount of error, and selected lambda 
+##########################################################################################################
 
 run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=1,scale=1,err_type="normal",est_var=FALSE,K_list =c(2,3,4,5,6,7,8,9,10,15,20,25,30),lambda_list = c(1:100/10000,2:100/1000,2:10/100)){
   if(k %*% 2 == 0){
@@ -517,31 +650,19 @@ run_experiment_ridge <- function(graph,edges,edge_mat,k=0,cv=0.9,sd_level=1,tau=
   return(results)
 }
 
-run_experiment3 <- function(graph,edges,edge_mat,k=0,cv=0.9,tau=1,scale=10,err_type="normal",est_var=FALSE,K=K,sd_list=c(0.1,0.5,1,2,3,5)){
-  if(k %*% 2 == 0){
-    active_set = which(apply(edges,1, function(x) get_active(graph,x,x_sep=4))==1)
-  }
-  else{
-    active_set = c(5,20,37,43)
-  }
-  for(sd in sd_list){
-    print(sd)
-    dat = generate_data(graph,edges,edge_mat, active_set,scale=scale,k=k,sd_level=sd,tau=tau,err_type=err_type,est_var=est_var)
-    sd_est = dat$sd_est
-    res <- get_CI2(dat$f_Y,dat$g_Y,dat$Y,edge_mat,dat$mean,dat$sd_est,cv=cv,k=k,K=K)
-    comp <- cbind(res$metrics,k,cv,sd,tau,scale,est_var,K)
-    if(sd==sd_list[1]){
-      results = comp
-    }
-    else{
-      results = rbind(results,comp)
-    }
-    method <- rownames(results)
-    colnames(results) <- c(colnames(res$metrics),"k","cv","sd","tau","scale","est_var","K")
-  }
-  return(results)
-}
 
+
+##########################################################################################################
+# pois_loss: Computes Poisson loss with L_1 error
+#
+# Inputs: beta - Poisson regression coefficients (numeric)
+#         y - Response variable (numeric)
+#         edge_mat - Graph difference matrix (matrix)
+#         k - Order of basis (integer)
+#         lambda - Regularization parameter for Poisson regression (numeric)
+#
+# Outputs: Poisson loss value (numeric)
+##########################################################################################################
 
 
 pois_loss <- function(beta,y,edge_mat,k=0,lambda=1){
@@ -557,10 +678,30 @@ pois_loss <- function(beta,y,edge_mat,k=0,lambda=1){
 }
 
 
+##########################################################################################################
+# run_tf_pois: Creates fitted trend based on poisson loss
+#
+# Inputs: y - Initial values (numeric)
+#         edge_mat - Graph difference matrix (matrix)
+#         k - Order of basis (integer)
+#         lambda - Regularization parameter for Poisson regression (numeric)
+#
+# Outputs: Result of optimization
+##########################################################################################################
+
 run_tf_pois <- function(y,edge_mat,k=0,lambda=1) {
   o <- optim(y,function(x) pois_loss(x,y,edge_mat,k=k,lambda=lambda))
   return(o)
 }
+
+##########################################################################################################
+# split_poisson: Splits the response variable into multiple components using data fission decomposition rules
+#
+# Inputs: y - Response variable (numeric)
+#         K - Number of data splits (integer)
+#
+# Outputs: Matrix containing split components of the response variable (numeric matrix)
+##########################################################################################################
 
 
 split_poisson <- function(y,K){
@@ -569,6 +710,18 @@ split_poisson <- function(y,K){
   return(t(folds))
 }
 
+
+##########################################################################################################
+# get_fit_pois: Computes Poisson regression fit given a selected basis
+#
+# Inputs: Y - Response variable (numeric)
+#         truth - True mean values for the basis matrix (numeric)
+#         basis - Basis matrix for Poisson regression (numeric matrix)
+#         cv - Confidence level (numeric)
+#
+# Outputs: List containing CIs using standard software packages along with CIS using sandwich errors. 
+#          Also computes metrics such as CI length and error for both types of CIs. 
+##########################################################################################################
 
 get_fit_pois <-function(Y,truth,basis,cv=0.9){
   alpha = 1-cv
@@ -596,6 +749,19 @@ get_fit_pois <-function(Y,truth,basis,cv=0.9){
   return(list(fit=fit,metrics=metrics))
 }
 
+
+##########################################################################################################
+# generate_data_pois: Generates synthetic Poisson data based on the given graph structure, edges, and parameters
+#
+# Inputs: graph - Graph structure (matrix)
+#         edges - Edge in the form of a list with (node1, node2) entries (matrix)
+#         edge_mat - Graph difference matrix (matrix)
+#         active_set - List of edges to consider active (vector)
+#         k - Order of basis (integer)
+#         scale - Scaling of coefficients for generated data (numeric)
+#
+# Outputs: List containing Poisson regression coefficients, basis matrix, true mean values, and response variable
+##########################################################################################################
 
 generate_data_pois <- function(graph,edges,edge_mat, active_set,k=0,scale=10){
   graph_laplacian <- t(edge_mat) %*% edge_mat
@@ -647,6 +813,22 @@ generate_data_pois <- function(graph,edges,edge_mat, active_set,k=0,scale=10){
 }
 
 
+##########################################################################################################
+# run_experiment_poisson: Runs Poisson regression experiment with different values of K, lambda, and computes metrics
+#                         including error, interval length, and coverage
+#
+# Inputs: graph - Graph structure (matrix)
+#         edges - Edge in the form of a list with (node1, node2) entries (matrix)
+#         edge_mat - Graph difference matrix (matrix)
+#         scale - Scaling of coefficients for generated data (numeric)
+#         k - Order of basis (integer)
+#         cv - Confidence level (numeric)
+#         K - Number of data splits (integer)
+#         lambda_list - List of lambda values for Poisson regression (numeric vector)
+#
+# Outputs: List containing experiment results including size of basis, lambda values, error,
+#          interval length, and coverage probability
+##########################################################################################################
 
 
 run_experiment_poisson <- function(graph,edges,ege_mat,scale=1,k=0,cv=0.9,K=5,lambda_list=c(1:10/100,1:10,20,25,30)){
