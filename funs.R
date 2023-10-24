@@ -353,6 +353,105 @@ get_fit <-function(basis,comp_df,select_df,infer_df,true_mean,sd_low,sd_high,sd_
   return(list(fit=fit,metrics=metrics))
 }
 
+
+
+##########################################################################################################
+# get_CI: Uses selection graph to tune lambda via graph cross validation, and then constructs CIs using inference graph.
+#          Deprecated compared to CI, as it only computes CI under the assumption that variance is known. 
+#
+# Inputs: select_df - Selection data Y_sel, formed with added noise (numeric)
+#         infer_df - Inference data Y_inf, formed with added noise (numeric)
+#         edge_mat - Graph difference matrix (matrix)
+#         true_mean - True mean vector mu (E[Y]) (numeric)
+#         cv - Confidence level (numeric)
+#         k - Order of basis (integer)
+#         K - Number of folds for cross-validation (integer)
+#
+# Outputs: List containing fitted trends using 1se rule, min CV rule, and SURE to select basis, along with evaluation
+##########################################################################################################
+
+
+get_CI <- function(select_df,infer_df,edge_mat,true_mean,cv=0.9,k=0,sd_level=1,SURE=TRUE,K=5){
+  
+  h = run_tf(select_df,edge_mat,k=k)
+  
+  
+  resid = sapply(1:dim(h$beta)[2], function(x) h$beta[,x] - select_df)
+  mse = colMeans(resid**2)
+  sure = mse+2*h$df*sd_level/nrow(h$beta)
+  lambda_sure = h$lambda[which(sure == min(sure))]    
+  
+  
+  
+  splits <- t(sapply(select_df, function(x) multi_split(x,K,sd_level)))
+  for(fold in 1:K){
+    train <- (rowSums(splits) - splits[,fold])/(1-1/K)
+    test <- splits[,fold]*K
+    h = run_tf(train,edge_mat,k=k)
+    res <- sapply(1:ncol(h$fit),function(x) h$fit[,x] - test)
+    mse <- apply(res**2,2,mean)
+    if(fold ==1 ){
+      cv_mse = mse
+    }
+    else{
+      cv_mse = rbind(cv_mse,mse)
+    }
+  }
+  mse <- apply(cv_mse,2,mean)
+  sd <- apply(cv_mse,2,sd)
+  
+  ind <- which(mse == min(mse))
+  ind_1se <- min(which(mse < (mse[ind] + sd[ind])))
+  lambda_1se = h$lambda[ind_1se]
+  lambda_min = h$lambda[ind]
+  
+  
+  
+  
+  
+  
+  fit = coef(h,lambda=lambda_1se)$beta
+  basis <- get_basis(fit,edge_mat, k)
+  reg <- lm(infer_df~0+basis)
+  pred <- predict(reg,interval="confidence",level = cv)
+  projected_mean <- lm(true_mean~0+basis)$fitted.values
+  fit_1se = setNames(cbind(projected_mean,fit,pred),c("proj_mean","fit_1","fit_2","lwr","upr"))
+  errtrue_1se = mean((pred[,1] - true_mean)**2)
+  errproj_1se = mean((pred[,1] - projected_mean)**2)
+  length_1se = mean(fit_1se[,5] - fit_1se[,4])
+  cover_1se <- mean((fit_1se[,1] >fit_1se[,4]) & (fit_1se[,1] <fit_1se[,5]))
+  df_1se <- ncol(basis)
+  
+  fit = coef(h,lambda=lambda_min)$beta
+  basis <- get_basis(fit,edge_mat, k)
+  reg <- lm(infer_df~0+basis)
+  pred <- predict(reg,interval="confidence",level = cv)
+  projected_mean <- lm(true_mean~0+basis)$fitted.values
+  fit_min = setNames(cbind(projected_mean,fit,pred),c("proj_mean","fit_1","fit_2","lwr","upr"))
+  errtrue_min = mean((pred[,1] - true_mean)**2)
+  errproj_min = mean((pred[,1] - projected_mean)**2)
+  df_min <- ncol(basis)
+  length_min = mean(fit_min[,5] - fit_min[,4])
+  cover_min <- mean((fit_min[,1] >fit_min[,4]) & (fit_min[,1] <fit_min[,5]))
+  
+  fit = coef(h,lambda=lambda_sure)$beta
+  basis <- get_basis(fit,edge_mat, k)
+  reg <- lm(infer_df~0+basis)
+  pred <- predict(reg,interval="confidence",level = cv)
+  projected_mean <- lm(true_mean~0+basis)$fitted.values
+  fit_sure = setNames(cbind(projected_mean,fit,pred),c("proj_mean","fit_1","fit_2","lwr","upr"))
+  errtrue_sure = mean((pred[,1] - true_mean)**2)
+  errproj_sure = mean((pred[,1] - projected_mean)**2)
+  length_sure = mean(fit_sure[,5] - fit_sure[,4])
+  cover_sure <- mean((fit_sure[,1] >fit_sure[,4]) & (fit_sure[,1] <fit_sure[,5]))
+  
+  df_sure <- ncol(basis)
+  
+  return(list(fit_1se=fit_1se,fit_min=fit_min,fit_sure = fit_sure,num_components = c(df_1se,df_min,df_sure),lambda=c(lambda_1se,lambda_min,lambda_sure),
+              errproj=c(errproj_1se,errproj_min,errproj_sure),errtrue=c(errtrue_1se,errtrue_min,errtrue_sure),
+              cover=c(cover_1se,cover_min,cover_sure),length=c(length_1se,length_min,length_sure)))
+}
+
 ##########################################################################################################
 # get_CI2: Uses selection graph to tune lambda via graph cross validation, and then constructs CIs using inference graph.
 #
