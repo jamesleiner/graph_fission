@@ -21,3 +21,5 @@ To generate experiments and figures used in the paper
 * After all results have been saved, run the script create_graphs.R to create the figures used in the paper
 
 
+* The experiments for the interactive multiple testing application (section 3) need to be run on a cluster. To do this, please
+  * Create a results folder in your working directory to store output
